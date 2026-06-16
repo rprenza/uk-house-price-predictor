@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import xgboost as xgb
+from sklearn.model_selection import train_test_split
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -60,26 +61,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
-# ── Load model — JSON format (version-independent) ────────────────────────────
-@st.cache_resource
-def load_model():
-    model = xgb.XGBRegressor()
-    model.load_model("model_xgboost.json")
-    with open("features_list.pkl", "rb") as f:
-        features = pickle.load(f)
-    return model, features
-
-@st.cache_resource
-def load_geo():
-    with open("geo_medians.pkl", "rb") as f:
-        geo = pickle.load(f)
-    county_median = pd.Series(geo["county_median"])
-    town_median   = pd.Series(geo["town_median"])
-    town_county   = pd.DataFrame(geo["town_county"]) if geo["town_county"] else None
-    return county_median, town_median, town_county
-
-
 # ── Constants ─────────────────────────────────────────────────────────────────
 BOE_RATES = {
     1:4.75,2:4.50,3:4.50,4:4.25,5:4.25,6:4.25,
@@ -94,12 +75,46 @@ PROPERTY_LABELS = {
 }
 MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
                "Jul","Aug","Sep","Oct","Nov","Dec"]
-SEASON_MAP  = {
+SEASON_MAP = {
     **{m:(0,"Winter") for m in [12,1,2]},
     **{m:(1,"Spring") for m in [3,4,5]},
     **{m:(2,"Summer") for m in [6,7,8]},
     **{m:(3,"Autumn") for m in [9,10,11]}
 }
+
+# ── Train model on startup ────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Training model — please wait (~1 min)...")
+def load_model_and_data():
+    # Load geo medians
+    with open("geo_medians.pkl", "rb") as f:
+        geo = pickle.load(f)
+    county_median = pd.Series(geo["county_median"])
+    town_median   = pd.Series(geo["town_median"])
+    town_county   = pd.DataFrame(geo["town_county"]) if geo["town_county"] else None
+
+    # Load reduced dataset (uploaded to GitHub)
+    df = pd.read_csv("dataset_ml_small.csv")
+
+    target   = "price"
+    features = [c for c in df.columns if c != target]
+    X = df[features]
+    y = df[target]
+
+    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    model = xgb.XGBRegressor(
+        n_estimators=150,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        n_jobs=-1,
+        verbosity=0
+    )
+    model.fit(X_train, y_train)
+
+    return model, features, county_median, town_median, town_county
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -110,15 +125,11 @@ st.markdown(
 )
 st.divider()
 
-# ── Load assets ───────────────────────────────────────────────────────────────
+# ── Load ──────────────────────────────────────────────────────────────────────
 try:
-    model, features                         = load_model()
-    county_median, town_median, town_county = load_geo()
+    model, features, county_median, town_median, town_county = load_model_and_data()
 except FileNotFoundError as e:
-    st.error(
-        f"⚠️ Required file not found: **{e}**\n\n"
-        "Run `python train_lightweight_model.py` first to generate the model files."
-    )
+    st.error(f"⚠️ Required file not found: **{e}**")
     st.stop()
 
 
@@ -140,7 +151,6 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📍 Location")
-
     counties = sorted(county_median.index.tolist())
     county   = st.selectbox("County", options=counties)
 
@@ -257,7 +267,6 @@ with col_right:
     st.subheader("🗺️ Top 10 Counties by Median Price")
     top10 = county_median.sort_values(ascending=False).head(10)
     st.bar_chart(pd.DataFrame({"Median Price (£)": top10}))
-
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
