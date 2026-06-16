@@ -52,9 +52,9 @@ This project follows a full end-to-end ML workflow:
 
 | Model | RMSE | MAE | R² |
 |-------|------|-----|----|
-| Linear Regression | — | — | — |
-| Random Forest | — | — | — |
-| **XGBoost** | **—** | **—** | **—** |
+| Linear Regression | £250,237 | £121,253 | 0.3787 |
+| Random Forest | £230,841 | £106,690 | 0.4713 |
+| **XGBoost** | £232,541 | £107,954 | 0.4634 |
 
 > *Fill in your results from `03_modelling.ipynb` after running the notebook.*
 
