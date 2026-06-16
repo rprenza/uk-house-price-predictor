@@ -56,7 +56,7 @@ This project follows a full end-to-end ML workflow:
 | Random Forest | £230,841 | £106,690 | 0.4713 |
 | **XGBoost** | £232,541 | £107,954 | 0.4634 |
 
-> *Fill in your results from `03_modelling.ipynb` after running the notebook.*
+
 
 ---
 
