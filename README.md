@@ -8,9 +8,16 @@ Built as a capstone project for the **Imperial College London Professional Certi
 
 ## 🌐 Live Demo
 
-> Run the app locally following the instructions below.
+**Try the app here →** [uk-house-price-predictor-2025rp.streamlit.app](https://uk-house-price-predictor-2025rp.streamlit.app/)
+
+Select a property type, location, and sale date to get an instant price estimate powered by the XGBoost model trained on 2025 Land Registry data.
 
 ![App Screenshot](https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=900&q=60)
+
+---
+
+> Run the app locally following the instructions below.
+
 
 ---
 
