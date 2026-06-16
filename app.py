@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
+import xgboost as xgb
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -60,11 +61,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Load model & geo data ─────────────────────────────────────────────────────
+# ── Load model — JSON format (version-independent) ────────────────────────────
 @st.cache_resource
 def load_model():
-    with open("model_xgboost.pkl", "rb") as f:
-        model = pickle.load(f)
+    model = xgb.XGBRegressor()
+    model.load_model("model_xgboost.json")
     with open("features_list.pkl", "rb") as f:
         features = pickle.load(f)
     return model, features
@@ -111,7 +112,7 @@ st.divider()
 
 # ── Load assets ───────────────────────────────────────────────────────────────
 try:
-    model, features         = load_model()
+    model, features                         = load_model()
     county_median, town_median, town_county = load_geo()
 except FileNotFoundError as e:
     st.error(
@@ -127,13 +128,13 @@ with st.sidebar:
     st.markdown("Fill in the details and click **Predict Price**.")
     st.divider()
 
-    prop_type  = st.selectbox(
+    prop_type    = st.selectbox(
         "Property Type",
         options=list(PROPERTY_LABELS.keys()),
         format_func=lambda x: PROPERTY_LABELS[x]
     )
-    new_build  = st.radio("New Build?", ["No","Yes"], horizontal=True)
-    tenure     = st.radio("Tenure", ["Freehold","Leasehold"], horizontal=True)
+    new_build    = st.radio("New Build?", ["No","Yes"], horizontal=True)
+    tenure       = st.radio("Tenure", ["Freehold","Leasehold"], horizontal=True)
     is_new_build = 1 if new_build == "Yes" else 0
     is_freehold  = 1 if tenure == "Freehold" else 0
 
@@ -154,8 +155,8 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📅 Sale Date")
-    month = st.slider("Month", min_value=1, max_value=12, value=6)
-    quarter = (month - 1) // 3 + 1
+    month       = st.slider("Month", min_value=1, max_value=12, value=6)
+    quarter     = (month - 1) // 3 + 1
     season_num, season_name = SEASON_MAP[month]
     st.caption(f"**{MONTH_NAMES[month-1]}** · Q{quarter} · {season_name}")
 
