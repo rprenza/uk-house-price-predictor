@@ -60,36 +60,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Load model & data ─────────────────────────────────────────────────────────
+# ── Load model & geo data ─────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
-    with open('model_xgboost.pkl', 'rb') as f:
+    with open("model_xgboost.pkl", "rb") as f:
         model = pickle.load(f)
-    with open('features_list.pkl', 'rb') as f:
+    with open("features_list.pkl", "rb") as f:
         features = pickle.load(f)
     return model, features
 
-@st.cache_data
-def load_geo_data():
-    df = pd.read_csv('dataset_ml.csv')
-    county_median = df.groupby('county')['price'].median() if 'county' in df.columns else None
-    town_median   = df.groupby('town')['price'].median()   if 'town'   in df.columns else None
-    if county_median is None or town_median is None:
-        df2 = pd.read_csv('dataset_clean.csv')
-        county_median = df2.groupby('county')['price'].median()
-        town_median   = df2.groupby('town')['price'].median()
-    return county_median, town_median
-
-@st.cache_data
-def load_town_county_map():
-    try:
-        df = pd.read_csv('dataset_clean.csv', usecols=['county','town'])
-        return df.dropna().drop_duplicates()
-    except Exception:
-        return None
+@st.cache_resource
+def load_geo():
+    with open("geo_medians.pkl", "rb") as f:
+        geo = pickle.load(f)
+    county_median = pd.Series(geo["county_median"])
+    town_median   = pd.Series(geo["town_median"])
+    town_county   = pd.DataFrame(geo["town_county"]) if geo["town_county"] else None
+    return county_median, town_median, town_county
 
 
-# ── Macro data 2025 ───────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 BOE_RATES = {
     1:4.75,2:4.50,3:4.50,4:4.25,5:4.25,6:4.25,
     7:4.25,8:4.25,9:4.00,10:4.00,11:4.00,12:4.00
@@ -98,22 +88,16 @@ INFLATION = {
     1:3.0,2:2.8,3:2.6,4:3.5,5:3.4,6:3.3,
     7:3.2,8:3.1,9:3.0,10:3.0,11:2.9,12:2.8
 }
-
 PROPERTY_LABELS = {
-    'D': 'Detached',
-    'S': 'Semi-detached',
-    'T': 'Terraced',
-    'F': 'Flat / Maisonette'
+    "D":"Detached","S":"Semi-detached","T":"Terraced","F":"Flat / Maisonette"
 }
-
-MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun',
-               'Jul','Aug','Sep','Oct','Nov','Dec']
-
-SEASON_MAP = {
-    **{m: (0,'Winter') for m in [12,1,2]},
-    **{m: (1,'Spring') for m in [3,4,5]},
-    **{m: (2,'Summer') for m in [6,7,8]},
-    **{m: (3,'Autumn') for m in [9,10,11]}
+MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
+               "Jul","Aug","Sep","Oct","Nov","Dec"]
+SEASON_MAP  = {
+    **{m:(0,"Winter") for m in [12,1,2]},
+    **{m:(1,"Spring") for m in [3,4,5]},
+    **{m:(2,"Summer") for m in [6,7,8]},
+    **{m:(3,"Autumn") for m in [9,10,11]}
 }
 
 
@@ -127,16 +111,12 @@ st.divider()
 
 # ── Load assets ───────────────────────────────────────────────────────────────
 try:
-    model, features = load_model()
-    county_median, town_median = load_geo_data()
-    town_county_map = load_town_county_map()
+    model, features         = load_model()
+    county_median, town_median, town_county = load_geo()
 except FileNotFoundError as e:
     st.error(
         f"⚠️ Required file not found: **{e}**\n\n"
-        "Make sure the following files are in the same folder as `app.py`:\n"
-        "- `model_xgboost.pkl`\n"
-        "- `features_list.pkl`\n"
-        "- `dataset_ml.csv`"
+        "Run `python train_lightweight_model.py` first to generate the model files."
     )
     st.stop()
 
@@ -147,36 +127,29 @@ with st.sidebar:
     st.markdown("Fill in the details and click **Predict Price**.")
     st.divider()
 
-    # Property type
-    prop_type = st.selectbox(
+    prop_type  = st.selectbox(
         "Property Type",
         options=list(PROPERTY_LABELS.keys()),
         format_func=lambda x: PROPERTY_LABELS[x]
     )
-
-    # New build
-    new_build = st.radio("New Build?", ["No", "Yes"], horizontal=True)
+    new_build  = st.radio("New Build?", ["No","Yes"], horizontal=True)
+    tenure     = st.radio("Tenure", ["Freehold","Leasehold"], horizontal=True)
     is_new_build = 1 if new_build == "Yes" else 0
-
-    # Tenure
-    tenure = st.radio("Tenure", ["Freehold", "Leasehold"], horizontal=True)
-    is_freehold = 1 if tenure == "Freehold" else 0
+    is_freehold  = 1 if tenure == "Freehold" else 0
 
     st.divider()
     st.subheader("📍 Location")
 
     counties = sorted(county_median.index.tolist())
-    county = st.selectbox("County", options=counties)
+    county   = st.selectbox("County", options=counties)
 
-    # Filter towns by selected county
-    if town_county_map is not None:
+    if town_county is not None:
         towns_in_county = sorted(
-            town_county_map[town_county_map['county'] == county]['town']
+            town_county[town_county["county"] == county]["town"]
             .dropna().unique().tolist()
         )
     else:
         towns_in_county = sorted(town_median.index.tolist())
-
     town = st.selectbox("Town / City", options=towns_in_county)
 
     st.divider()
@@ -197,42 +170,27 @@ with col_left:
     st.subheader("📊 Prediction Result")
 
     if predict_btn:
-        # Resolve geographic medians
         c_med = float(county_median.get(county, county_median.median()))
-        t_med = float(town_median.get(town,   town_median.median()))
+        t_med = float(town_median.get(town,     town_median.median()))
+        boe   = BOE_RATES.get(month, 4.25)
+        infl  = INFLATION.get(month, 3.0)
 
-        boe  = BOE_RATES.get(month, 4.25)
-        infl = INFLATION.get(month, 3.0)
-
-        # One-hot encoding (drop_first=True dropped 'D' as reference)
-        type_F = 1 if prop_type == 'F' else 0
-        type_S = 1 if prop_type == 'S' else 0
-        type_T = 1 if prop_type == 'T' else 0
+        type_F = 1 if prop_type == "F" else 0
+        type_S = 1 if prop_type == "S" else 0
+        type_T = 1 if prop_type == "T" else 0
 
         row = {
-            'month':        month,
-            'quarter':      quarter,
-            'season_num':   season_num,
-            'boe_rate':     boe,
-            'cpi':          infl,
-            'is_new_build': is_new_build,
-            'is_freehold':  is_freehold,
-            'county_median': c_med,
-            'town_median':   t_med,
-            'type_F':        type_F,
-            'type_S':        type_S,
-            'type_T':        type_T,
+            "month": month, "quarter": quarter, "season_num": season_num,
+            "boe_rate": boe, "cpi": infl,
+            "is_new_build": is_new_build, "is_freehold": is_freehold,
+            "county_median": c_med, "town_median": t_med,
+            "type_F": type_F, "type_S": type_S, "type_T": type_T,
         }
-
-        # Align to trained feature order
-        X_input = pd.DataFrame([{f: row.get(f, 0) for f in features}])
-
+        X_input    = pd.DataFrame([{f: row.get(f, 0) for f in features}])
         prediction = float(model.predict(X_input)[0])
         prediction = max(10_000, prediction)
-        low  = prediction * 0.90
-        high = prediction * 1.10
+        low, high  = prediction * 0.90, prediction * 1.10
 
-        # Prediction card
         st.markdown(f"""
         <div class="prediction-box">
             <div class="prediction-title">Estimated Sale Price</div>
@@ -248,23 +206,17 @@ with col_left:
         </div>
         """, unsafe_allow_html=True)
 
-        # Input summary
         st.subheader("📋 Input Summary")
         summary = {
             "Property Type": PROPERTY_LABELS[prop_type],
-            "New Build":     new_build,
-            "Tenure":        tenure,
-            "County":        county,
-            "Town":          town,
-            "Month":         MONTH_NAMES[month - 1],
-            "Quarter":       f"Q{quarter}",
-            "Season":        season_name,
-            "BoE Base Rate": f"{boe}%",
-            "CPI Inflation": f"{infl}%",
-            "County Median": f"£{c_med:,.0f}",
-            "Town Median":   f"£{t_med:,.0f}",
+            "New Build": new_build, "Tenure": tenure,
+            "County": county, "Town": town,
+            "Month": MONTH_NAMES[month-1], "Quarter": f"Q{quarter}",
+            "Season": season_name,
+            "BoE Base Rate": f"{boe}%", "CPI Inflation": f"{infl}%",
+            "County Median": f"£{c_med:,.0f}", "Town Median": f"£{t_med:,.0f}",
         }
-        st.table(pd.DataFrame(summary.items(), columns=["Parameter", "Value"]))
+        st.table(pd.DataFrame(summary.items(), columns=["Parameter","Value"]))
 
     else:
         st.markdown("""
@@ -278,44 +230,32 @@ with col_left:
             use_container_width=True
         )
 
-
 with col_right:
     st.subheader("📈 Market Context")
 
-    # County median card
     if county in county_median.index:
-        c_val = county_median[county]
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value">£{c_val:,.0f}</div>
+            <div class="metric-value">£{county_median[county]:,.0f}</div>
             <div class="metric-label">Median price in {county}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
-    # Town median card
     if town in town_median.index:
-        t_val = town_median[town]
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value">£{t_val:,.0f}</div>
+            <div class="metric-value">£{town_median[town]:,.0f}</div>
             <div class="metric-label">Median price in {town}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
-    # BoE rate card
-    boe_display = BOE_RATES.get(month, 4.25)
     st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-value">{boe_display}%</div>
+        <div class="metric-value">{BOE_RATES.get(month,4.25)}%</div>
         <div class="metric-label">BoE Base Rate · {MONTH_NAMES[month-1]} 2025</div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
-    # Top 10 counties chart
     st.subheader("🗺️ Top 10 Counties by Median Price")
     top10 = county_median.sort_values(ascending=False).head(10)
-    chart_df = pd.DataFrame({'County': top10.index, 'Median Price (£)': top10.values})
-    st.bar_chart(chart_df.set_index('County'))
+    st.bar_chart(pd.DataFrame({"Median Price (£)": top10}))
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
