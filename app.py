@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 
@@ -82,26 +81,27 @@ SEASON_MAP = {
     **{m:(3,"Autumn") for m in [9,10,11]}
 }
 
+
+# ── Load geo data from CSV ────────────────────────────────────────────────────
+@st.cache_data
+def load_geo():
+    county_df    = pd.read_csv("geo_county.csv")
+    town_df      = pd.read_csv("geo_town.csv")
+    town_county  = pd.read_csv("geo_town_county.csv")
+    county_median = county_df.set_index("county")["county_median"]
+    town_median   = town_df.set_index("town")["town_median"]
+    return county_median, town_median, town_county
+
+
 # ── Train model on startup ────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Training model — please wait (~1 min)...")
-def load_model_and_data():
-    # Load geo medians
-    with open("geo_medians.pkl", "rb") as f:
-        geo = pickle.load(f)
-    county_median = pd.Series(geo["county_median"])
-    town_median   = pd.Series(geo["town_median"])
-    town_county   = pd.DataFrame(geo["town_county"]) if geo["town_county"] else None
-
-    # Load reduced dataset (uploaded to GitHub)
+def train_model():
     df = pd.read_csv("dataset_ml_small.csv")
-
     target   = "price"
     features = [c for c in df.columns if c != target]
     X = df[features]
     y = df[target]
-
     X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
-
     model = xgb.XGBRegressor(
         n_estimators=150,
         learning_rate=0.05,
@@ -113,8 +113,7 @@ def load_model_and_data():
         verbosity=0
     )
     model.fit(X_train, y_train)
-
-    return model, features, county_median, town_median, town_county
+    return model, features
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -127,7 +126,8 @@ st.divider()
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 try:
-    model, features, county_median, town_median, town_county = load_model_and_data()
+    county_median, town_median, town_county = load_geo()
+    model, features = train_model()
 except FileNotFoundError as e:
     st.error(f"⚠️ Required file not found: **{e}**")
     st.stop()
@@ -154,13 +154,10 @@ with st.sidebar:
     counties = sorted(county_median.index.tolist())
     county   = st.selectbox("County", options=counties)
 
-    if town_county is not None:
-        towns_in_county = sorted(
-            town_county[town_county["county"] == county]["town"]
-            .dropna().unique().tolist()
-        )
-    else:
-        towns_in_county = sorted(town_median.index.tolist())
+    towns_in_county = sorted(
+        town_county[town_county["county"] == county]["town"]
+        .dropna().unique().tolist()
+    )
     town = st.selectbox("Town / City", options=towns_in_county)
 
     st.divider()
